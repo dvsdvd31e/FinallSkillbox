@@ -44,18 +44,15 @@ public class SearchServiceImpl implements SearchService {
             return new SearchResponse("Не удалось обработать запрос");
         }
 
-        // Получаем список разрешенных сайтов из конфигурации
         List<String> allowedSites = sitesList.getSites().stream()
-                .map(ConfigSite::getUrl) // Извлекаем URL из конфигурации
+                .map(ConfigSite::getUrl)
                 .collect(Collectors.toList());
 
-        // Если сайт не задан, фильтруем страницы только по леммам и разрешенным сайтам
         List<Page> pages = pageRepository.findPagesByLemmas(lemmas);
         List<Page> pagesWithMatches = pages.stream()
                 .filter(page -> hasLemmasMatches(page, lemmas) && isSiteAllowed(page.getSite().getUrl(), allowedSites))
                 .collect(Collectors.toList());
 
-        // Если сайт задан, фильтруем дополнительно по нему
         if (site != null && !site.isEmpty()) {
             pagesWithMatches = pagesWithMatches.stream()
                     .filter(page -> page.getSite().getUrl().equalsIgnoreCase(site))
@@ -81,7 +78,6 @@ public class SearchServiceImpl implements SearchService {
         return new SearchResponse(true, totalCount, results);
     }
 
-    // Проверяем, что сайт страницы присутствует в разрешенных сайтах
     private boolean isSiteAllowed(String pageUrl, List<String> allowedSites) {
         return allowedSites.contains(pageUrl);
     }
@@ -152,7 +148,7 @@ public class SearchServiceImpl implements SearchService {
         } else if (!title.isEmpty()) {
             return title;
         } else {
-            return path; // может быть пустым, если оба пустые
+            return path;
         }
     }
 }
