@@ -8,6 +8,8 @@ import searchengine.repository.LemmaRepository;
 import searchengine.repository.IndexRepository;
 import searchengine.utils.LemmaProcessor;
 import searchengine.model.Page;
+import searchengine.config.ConfigSite ;
+import searchengine.config.SitesList ;
 import java.util.regex.Pattern;
 import java.util.Comparator;
 import java.util.ArrayList;
@@ -20,13 +22,15 @@ public class SearchServiceImpl implements SearchService {
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
     private final LemmaProcessor lemmaProcessor;
+    private final SitesList sitesList;
 
     public SearchServiceImpl(PageRepository pageRepository, LemmaRepository lemmaRepository,
-                             IndexRepository indexRepository, LemmaProcessor lemmaProcessor) {
+                             IndexRepository indexRepository, LemmaProcessor lemmaProcessor, SitesList sitesList) {
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
         this.lemmaProcessor = lemmaProcessor;
+        this.sitesList = sitesList;
     }
 
     @Override
@@ -40,13 +44,23 @@ public class SearchServiceImpl implements SearchService {
             return new SearchResponse("Не удалось обработать запрос");
         }
 
-        List<Page> pages = (site == null || site.isEmpty())
-                ? pageRepository.findPagesByLemmas(lemmas)
-                : pageRepository.findPagesByLemmas(lemmas, site);
-
-        List<Page> pagesWithMatches = pages.stream()
-                .filter(page -> hasLemmasMatches(page, lemmas))
+        // Получаем список разрешенных сайтов из конфигурации
+        List<String> allowedSites = sitesList.getSites().stream()
+                .map(ConfigSite::getUrl) // Извлекаем URL из конфигурации
                 .collect(Collectors.toList());
+
+        // Если сайт не задан, фильтруем страницы только по леммам и разрешенным сайтам
+        List<Page> pages = pageRepository.findPagesByLemmas(lemmas);
+        List<Page> pagesWithMatches = pages.stream()
+                .filter(page -> hasLemmasMatches(page, lemmas) && isSiteAllowed(page.getSite().getUrl(), allowedSites))
+                .collect(Collectors.toList());
+
+        // Если сайт задан, фильтруем дополнительно по нему
+        if (site != null && !site.isEmpty()) {
+            pagesWithMatches = pagesWithMatches.stream()
+                    .filter(page -> page.getSite().getUrl().equalsIgnoreCase(site))
+                    .collect(Collectors.toList());
+        }
 
         int totalCount = pagesWithMatches.size();
 
@@ -65,6 +79,11 @@ public class SearchServiceImpl implements SearchService {
                 .collect(Collectors.toList());
 
         return new SearchResponse(true, totalCount, results);
+    }
+
+    // Проверяем, что сайт страницы присутствует в разрешенных сайтах
+    private boolean isSiteAllowed(String pageUrl, List<String> allowedSites) {
+        return allowedSites.contains(pageUrl);
     }
 
     private boolean hasLemmasMatches(Page page, List<String> lemmas) {
