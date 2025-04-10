@@ -8,6 +8,8 @@ import searchengine.repository.LemmaRepository;
 import searchengine.repository.IndexRepository;
 import searchengine.utils.LemmaProcessor;
 import searchengine.model.Page;
+import java.util.regex.Pattern;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -19,7 +21,8 @@ public class SearchServiceImpl implements SearchService {
     private final IndexRepository indexRepository;
     private final LemmaProcessor lemmaProcessor;
 
-    public SearchServiceImpl(PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository, LemmaProcessor lemmaProcessor) {
+    public SearchServiceImpl(PageRepository pageRepository, LemmaRepository lemmaRepository,
+                             IndexRepository indexRepository, LemmaProcessor lemmaProcessor) {
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
@@ -37,32 +40,31 @@ public class SearchServiceImpl implements SearchService {
             return new SearchResponse("Не удалось обработать запрос");
         }
 
-        List<Page> pages;
-        if (site == null || site.isEmpty()) {
-            pages = pageRepository.findPagesByLemmas(lemmas);
-        } else {
-            pages = pageRepository.findPagesByLemmas(lemmas, site);
-        }
+        List<Page> pages = (site == null || site.isEmpty())
+                ? pageRepository.findPagesByLemmas(lemmas)
+                : pageRepository.findPagesByLemmas(lemmas, site);
 
         List<Page> pagesWithMatches = pages.stream()
                 .filter(page -> hasLemmasMatches(page, lemmas))
                 .collect(Collectors.toList());
 
+        int totalCount = pagesWithMatches.size();
+
         List<SearchResult> results = pagesWithMatches.stream()
                 .map(page -> new SearchResult(
-                        page.getSite().getUrl(),
-                        page.getSite().getName(),
-                        page.getPath(),
-                        page.getTitle(),
-                        generateSnippet(page.getContent(), lemmas, page.getPath()),
+                        safeString(page.getSite().getUrl()),
+                        safeString(page.getSite().getName()),
+                        safeString(page.getPath()),
+                        buildTitleBlock(page),
+                        generateSnippet(page.getContent(), lemmas),
                         calculateRelevance(page, lemmas)
                 ))
-                .sorted((a, b) -> Double.compare(b.getRelevance(), a.getRelevance()))
+                .sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed())
                 .skip(offset)
                 .limit(limit)
                 .collect(Collectors.toList());
 
-        return new SearchResponse(true, results.size(), results);
+        return new SearchResponse(true, totalCount, results);
     }
 
     private boolean hasLemmasMatches(Page page, List<String> lemmas) {
@@ -75,7 +77,7 @@ public class SearchServiceImpl implements SearchService {
         return true;
     }
 
-    private String generateSnippet(String content, List<String> lemmas, String pagePath) {
+    private String generateSnippet(String content, List<String> lemmas) {
         int snippetLength = 200;
         String lowerContent = content.toLowerCase();
 
@@ -99,8 +101,8 @@ public class SearchServiceImpl implements SearchService {
         String snippet = content.substring(start, end);
 
         for (String lemma : lemmas) {
-            String lowerLemma = lemma.toLowerCase();
-            snippet = snippet.replaceAll("(?i)" + lowerLemma, "<b><a href=\"" + pagePath + "#match-" + lemma.hashCode() + "\">" + "$0" + "</a></b>");
+            String pattern = Pattern.quote(lemma);
+            snippet = snippet.replaceAll("(?i)" + pattern, "<b>$0</b>");
         }
 
         return "..." + snippet + "...";
@@ -112,9 +114,26 @@ public class SearchServiceImpl implements SearchService {
 
         for (String lemma : lemmas) {
             String lowerLemma = lemma.toLowerCase();
-            relevance += content.split(lowerLemma, -1).length - 1;
+            relevance += content.split(Pattern.quote(lowerLemma), -1).length - 1;
         }
 
         return relevance;
+    }
+
+    private String safeString(String value) {
+        return value != null ? value.trim() : "";
+    }
+
+    private String buildTitleBlock(Page page) {
+        String title = safeString(page.getTitle());
+        String path = safeString(page.getPath());
+
+        if (!title.isEmpty() && !path.isEmpty()) {
+            return title + " - " + path;
+        } else if (!title.isEmpty()) {
+            return title;
+        } else {
+            return path; // может быть пустым, если оба пустые
+        }
     }
 }
